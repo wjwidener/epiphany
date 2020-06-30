@@ -1,5 +1,6 @@
 import os
 import uuid
+from copy import deepcopy
 
 from cli.helpers.doc_list_helpers import select_first
 from cli.helpers.data_loader import load_yaml_obj, types
@@ -10,7 +11,7 @@ from cli.helpers.doc_list_helpers import select_single, select_all
 from cli.helpers.build_saver import get_terraform_path
 from cli.helpers.data_loader import load_json_obj
 from cli.helpers.naming_helpers import resource_name
-from cli.helpers.objdict_helpers import objdict_to_dict
+from cli.helpers.objdict_helpers import objdict_to_dict, dict_to_objdict
 from cli.version import VERSION
 
 
@@ -20,6 +21,7 @@ class InfrastructureBuilder(Step):
         self.cluster_model = select_single(docs, lambda x: x.kind == 'epiphany-cluster')
         self.cluster_name = self.cluster_model.specification.name.lower()
         self.cluster_prefix = self.cluster_model.specification.prefix.lower()
+        self.use_network_security_groups = self.cluster_model.specification.cloud.network.use_network_security_groups
         self.docs = docs
 
     def run(self):
@@ -46,6 +48,9 @@ class InfrastructureBuilder(Step):
 
         efs_config = self.get_efs_config()
 
+        if not(self.use_network_security_groups):
+            self.logger.warning('The "use_network_security_groups" flag is currently ignored on AWS')
+
         for component_key, component_value in self.cluster_model.specification.components.items():
             if component_value['count'] < 1:
                 continue
@@ -53,6 +58,7 @@ class InfrastructureBuilder(Step):
             subnets_to_create = []
             security_groups_to_create = []
             subnet_index = 0
+            asg_index = 0
             for subnet_definition in component_value.subnets:  # todo extract to another method or class
                 subnet = select_first(infrastructure, lambda item: item.kind == 'infrastructure/subnet' and
                                       item.specification.cidr_block == subnet_definition['address_pool'])
@@ -75,7 +81,7 @@ class InfrastructureBuilder(Step):
                 subnets_to_create.append(subnet)
                 security_groups_to_create.append(security_group)
 
-            autoscaling_group = self.get_autoscaling_group(component_key, component_value, subnets_to_create)
+            autoscaling_group = self.get_autoscaling_group(component_key, component_value, subnets_to_create, asg_index)
 
             for security_group in security_groups_to_create:
                 security_group.specification.rules += autoscaling_group.specification.security.rules
@@ -95,6 +101,7 @@ class InfrastructureBuilder(Step):
 
             infrastructure.append(autoscaling_group)
             infrastructure.append(launch_configuration)
+            asg_index += 1
 
         if self.has_efs_any_mounts(efs_config):
             infrastructure.append(efs_config)
@@ -126,10 +133,10 @@ class InfrastructureBuilder(Step):
         efs_config.specification.name = resource_name(self.cluster_prefix, self.cluster_name, 'efs')
         return efs_config
 
-    def get_autoscaling_group(self, component_key, component_value, subnets_to_create):
-        autoscaling_group = self.get_virtual_machine(component_value, self.cluster_model, self.docs)
+    def get_autoscaling_group(self, component_key, component_value, subnets_to_create, index):
+        autoscaling_group = dict_to_objdict(deepcopy(self.get_virtual_machine(component_value, self.cluster_model, self.docs)))
         autoscaling_group.specification.cluster_name = self.cluster_name
-        autoscaling_group.specification.name = resource_name(self.cluster_prefix, self.cluster_name, 'asg', component_key)
+        autoscaling_group.specification.name = resource_name(self.cluster_prefix, self.cluster_name, 'asg' + '-' + str(index), component_key)
         autoscaling_group.specification.count = component_value.count
         autoscaling_group.specification.subnet_names = [s.specification.name for s in subnets_to_create]
         autoscaling_group.specification.availability_zones = list(set([s.specification.availability_zone for s in subnets_to_create]))

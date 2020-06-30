@@ -10,35 +10,12 @@ from typing import Set, List, Dict
 import pkg_resources
 
 
-def _get_dependencies_from_pipfile() -> Set[str]:
-    with open('Pipfile') as pip_file:
-        start_gen = dropwhile(lambda x: x.strip() != '[packages]', pip_file)
-        next(start_gen)
-        interesting_gen = takewhile(lambda x: not (x.startswith('[') or x == "\n"), start_gen)
-        return {interesting.split()[0] for interesting in interesting_gen}
-
-
-def _get_package_dependencies(dependencies: List[Dict[str, str]]) -> Set[str]:
-    return {dependency['key'] for dependency in dependencies}
-
-
-def _get_recursive_dependencies_for(direct_dependencies: Set[str]) -> Set[str]:
-    result = subprocess.run(
-        ['pipenv', 'graph', '--json'], stdout=subprocess.PIPE)
-    dependencies_dict = {
-        k['package']['key']: k
-        for k in json.loads(result.stdout)
-    }
-    universe = set(dependencies_dict)
-    res = direct_dependencies
-    set_to_check = direct_dependencies
-    while set_to_check:
-        deps = universe & reduce(
-            lambda x, y: x | _get_package_dependencies(dependencies_dict[y]['dependencies']),
-            set_to_check, set())
-        set_to_check = deps - res
-        res = res | deps
-    return {dependencies_dict[r]['package']['package_name'] for r in res}
+def get_dependencies_from_requirements() -> Set[str]:
+    req = []
+    with open('.devcontainer/requirements.txt') as req_file:
+        for line in req_file:
+            req.append(line.split("==")[0])
+    return req
 
 def makeRequest(url, token):
     request = urllib.request.Request(url)
@@ -79,8 +56,10 @@ def get_pkg_data(pkgname: str, pat:str) -> str:
             split = home.split('/')
             repo = split[len(split)-1]
             user = split[len(split)-2]
-            license_data = json.loads(makeRequest('https://api.github.com/repos/' + user + '/' + repo + '/license', pat).read().decode())
+            license_url = 'https://api.github.com/repos/' + user + '/' + repo + '/license'
+            license_data = json.loads(makeRequest(license_url, pat).read().decode())
             pkg_data['License'] = license_data['license']['name']
+            pkg_data['License URL'] = license_url
             pkg_data['License repo'] = makeRequest(license_data['download_url'], pat).read().decode()
             if license_data['license']['key'] != 'other':
                 license_text =  json.loads(makeRequest(license_data['license']['url'], pat).read().decode())
@@ -96,14 +75,14 @@ def _main() -> None:
     if pat == None:
         logging.critical('No Github personal access tokens passed as argument.' )
         return
-    direct_dependencies = _get_dependencies_from_pipfile()
-    all_deps = _get_recursive_dependencies_for(direct_dependencies)
+    all_deps = get_dependencies_from_requirements()
     all_deps_data = []
     for dep in all_deps:
         data = get_pkg_data(dep, pat)
         if data != None:
             all_deps_data.append(data)
 
+    # Write licenses 'cli/licenses.py'
     licenses_content = """
 # This is a generated file so don`t change this manually. 
 # To re-generate run 'python gen-licenses.py' from the project root.
@@ -113,6 +92,27 @@ LICENSES = """ + json.dumps(all_deps_data, indent=4)
     path = os.path.join(os.path.dirname(__file__), 'cli/licenses.py')
     with open(path, 'w') as file:
         file.write(licenses_content)
+
+     # Write components table to be pasted into 'COMPONENTS.md'
+    dependancies_content = """
+| Component | Version | Repo/Website | License |
+| --------- | ------- | ------------ | ------- |
+"""   
+    for dep in all_deps_data: 
+        dep_name = dep['Name']
+        dep_version = dep['Version']
+        dep_website = dep['Home-page']
+        dep_license = dep['License']
+        if 'License URL' in dep:
+            dep_license_url = dep['License URL']
+            dep_line = f'| {dep_name} | {dep_version} | {dep_website} | [{dep_license}]({dep_license_url}) |\n'
+        else:
+            dep_line = f'| {dep_name} | {dep_version} | {dep_website} | {dep_license} |\n'
+        dependancies_content = dependancies_content + dep_line
+
+    path = os.path.join(os.path.dirname(__file__), 'DEPENDENCIES.md')
+    with open(path, 'w') as file:
+        file.write(dependancies_content)
 
 if __name__ == '__main__':
     _main()

@@ -34,7 +34,7 @@ class APIProxy:
         name = sp_data['name']
         password = sp_data['password']
         tenant = sp_data['tenant']
-        return self.run(self, f'az login --service-principal -u {name} -p {password} --tenant {tenant}')      
+        return self.run(self, f'az login --service-principal -u \'{name}\' -p "{password}" --tenant \'{tenant}\'', False)      
 
     def set_active_subscribtion(self, subscription_id):
         self.run(self, f'az account set --subscription {subscription_id}')  
@@ -45,7 +45,7 @@ class APIProxy:
     
     def create_sp(self, app_name, subscription_id):
         #TODO: make role configurable?
-        sp = self.run(self, f'az ad sp create-for-rbac -n "{app_name}" --role="Contributor" --scopes="/subscriptions/{subscription_id}"')
+        sp = self.run(self, f'az ad sp create-for-rbac -n \'{app_name}\' --role=\'Contributor\' --scopes=\'/subscriptions/{subscription_id}\'')
         # Sleep for a while. Sometimes the call returns before the rights of the SP are finished creating.
         self.wait(self, 60)
         return sp  
@@ -67,7 +67,7 @@ class APIProxy:
         return result
 
     def get_storage_account_primary_key(self, storage_account_name):
-        keys = self.run(self, f'az storage account keys list -g {self.resource_group_name} -n {storage_account_name}')
+        keys = self.run(self, f'az storage account keys list -g \'{self.resource_group_name}\' -n \'{storage_account_name}\'')
         return keys[0]['value']
 
     @staticmethod
@@ -77,8 +77,9 @@ class APIProxy:
             time.sleep(1)
 
     @staticmethod
-    def run(self, cmd):
-        self.logger.info('Running: "' + cmd + '"')
+    def run(self, cmd, log_cmd=True):
+        if log_cmd:
+            self.logger.info('Running: "' + cmd + '"')
 
         logpipe = LogPipe(__name__)
         with Popen(cmd, stdout=PIPE, stderr=logpipe, shell=True) as sp:
@@ -92,7 +93,11 @@ class APIProxy:
                 output = {}
 
         if sp.returncode != 0:
-            raise Exception(f'Error running: "{cmd}"')
+            if log_cmd:
+                raise Exception(f'Error running: "{cmd}"')
+            else:
+                raise Exception(f'Error running Azure APIProxy cmd')
         else:
-            self.logger.info(f'Done running "{cmd}"')
+            if log_cmd:
+                self.logger.info(f'Done running "{cmd}"')
             return output            

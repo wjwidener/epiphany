@@ -14,6 +14,7 @@ SP_FILE_NAME = 'sp.yml'
 INVENTORY_FILE_NAME = 'inventory'
 ANSIBLE_OUTPUT_DIR = 'ansible/'
 ANSIBLE_VAULT_OUTPUT_DIR = 'vault/'
+SPEC_OUTPUT_DIR = 'spec_tests/'
 
 BUILD_EPICLI = 'BUILD_EPICLI'
 BUILD_LEGACY = 'BUILD_LEGACY_02X'
@@ -42,6 +43,12 @@ def save_inventory(inventory, cluster_model, build_dir=None):
     content = template.render(inventory=inventory, cluster_model=cluster_model)
     file_path = os.path.join(build_dir, INVENTORY_FILE_NAME)
     save_to_file(file_path, content)
+
+
+def save_ansible_config_file(ansible_config_file_settings, ansible_config_file_path):
+    template = load_template_file(types.ANSIBLE, "common", "ansible.cfg")
+    content = template.render(ansible_config_file_settings=ansible_config_file_settings)
+    save_to_file(ansible_config_file_path, content)
 
 
 # method cleans generated .tf files (not tfstate)
@@ -93,6 +100,14 @@ def get_inventory_path_for_build(build_directory):
         return join(inventory, files[0]) 
 
 
+def get_ansible_config_file_path(cluster_name):
+    return os.path.join(get_ansible_path(cluster_name), "ansible.cfg")
+
+
+def get_ansible_config_file_path_for_build(build_directory):
+    return os.path.join(get_ansible_path_for_build(build_directory), "ansible.cfg")
+
+
 def check_build_output_version(build_directory):
     if not os.path.exists(build_directory):
         raise Exception('Build directory does not exist')
@@ -141,4 +156,3 @@ def copy_files_recursively(src, dst):
 
 def copy_file(src, dst):
     shutil.copy2(src, dst)
-
