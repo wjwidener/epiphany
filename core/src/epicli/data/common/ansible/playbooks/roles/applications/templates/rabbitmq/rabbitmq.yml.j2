@@ -46,7 +46,7 @@ data:
       ## Set to "hostname" to use pod hostnames.
       ## When this value is changed, so should the variable used to set the RABBITMQ_NODENAME
       ## environment variable.
-      cluster_formation.k8s.address_type = ip
+      cluster_formation.k8s.address_type = hostname
       ## How often should node cleanup checks run?
       cluster_formation.node_cleanup.interval = 30
       ## Set to false if automatic removal of unknown/absent nodes
@@ -109,7 +109,7 @@ spec:
           exec:
             command: ["rabbitmqctl", "status"]
           initialDelaySeconds: 20
-          periodSeconds: 60
+          periodSeconds: 120
           timeoutSeconds: 10
         imagePullPolicy: IfNotPresent
         env:
@@ -117,11 +117,32 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: status.podIP
+          - name: NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+          - name: HOSTNAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.name
           - name: RABBITMQ_USE_LONGNAME
             value: "true"
-          # See a note on cluster_formation.k8s.address_type in the config file section
           - name: RABBITMQ_NODENAME
-            value: "rabbit@$(MY_POD_IP)"
+            value: "rabbit@$(HOSTNAME).{{ rabbitmq_service_name }}.$(NAMESPACE).svc.cluster.local"
+          - name: K8S_ADDRESS_TYPE
+            value: "hostname"
+          - name: K8S_HOSTNAME_SUFFIX
+            value: ".{{ rabbitmq_service_name }}.$(NAMESPACE).svc.cluster.local"
+          - name: AUTOCLUSTER_CLEANUP
+            value: "false"
+          - name: AUTOCLUSTER_TYPE
+            value: "k8s"
+          - name: AUTOSCLUSTER_DELAY
+            value: "10"
+          - name: CLEANUP_WARN_ONLY
+            value: "true"
           - name: K8S_SERVICE_NAME
             value: "{{ rabbitmq_service_name }}"
           - name: RABBITMQ_ERLANG_COOKIE
